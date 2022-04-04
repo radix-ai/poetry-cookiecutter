@@ -13,24 +13,28 @@ jobs:
 
     steps:
 
+      - name: Download artifact
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: test.yml
+          workflow_conclusion: success
+          commit: {% raw %}${{ github.sha }}{% endraw %}
+          name: ci-image-hash
+
+      - name: Load base image variable from `test.yml` artifact
+        id: base_image
+        shell: bash
+        run: |
+          source .ci_image_hash
+          echo ::set-output name=DOCKER_BASE_IMAGE::$DOCKER_BASE_IMAGE
+
       - name: Checkout
         uses: actions/checkout@v2
 
-      - name: Set up Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: "{{ cookiecutter.python_version }}"
-
-      - name: Install Poetry
-        run: pip install --no-input poetry
-
       - name: Publish package
-        run: |
-          {%- if cookiecutter.private_package_repository_name %}
-          poetry config repositories.private "{{ cookiecutter.private_package_repository_url.replace('simple', '') }}"
-          poetry config http-basic.private "{% raw %}${{{% endraw %} secrets.POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_USERNAME }}" "{% raw %}${{{% endraw %} secrets.POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_PASSWORD }}"
-          poetry publish --build --repository private
-          {%- else %}
-          poetry config http-basic.pypi "__token__" "{% raw %}${{ secrets.POETRY_PYPI_TOKEN_PYPI }}{% endraw %}"
-          poetry publish --build
-          {%- endif %}
+        shell: bash
+        {%- if cookiecutter.private_package_repository_name %}
+        run: docker run --mount type=bind,src=$PWD,dst=/app --rm {% raw %}${{ steps.base_image.outputs.DOCKER_BASE_IMAGE }}{% endraw %} /bin/bash -c "set -e; poetry config repositories.private '{{ cookiecutter.private_package_repository_url.replace("simple", "") }}'; poetry config http-basic.private '{% raw %}${{{% endraw %} secrets.POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_USERNAME }}' '{% raw %}${{{% endraw %} secrets.POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_PASSWORD }}'; poetry publish --build --repository private"
+        {%- else %}
+        run: docker run --mount type=bind,src=$PWD,dst=/app --rm {% raw %}${{ steps.base_image.outputs.DOCKER_BASE_IMAGE }}{% endraw %} /bin/bash -c "set -e; poetry config http-basic.pypi '__token__' '{% raw %}${{ secrets.POETRY_PYPI_TOKEN_PYPI }}{% endraw %}'; poetry publish --build"
+        {%- endif %}

@@ -12,10 +12,11 @@ A modern [Cookiecutter](https://cookiecutter.readthedocs.io) template for scaffo
    pip install cruft
    ```
 2. Create a new repository and clone it locally.
-3. In the repository's parent directory, run:
+3. In the **repository's parent directory**, run:
    ```sh
    cruft create -f git@github.com:radix-ai/poetry-cookiecutter.git
    ```
+4. Answer the templating questions in the shell and make sure to use the repository name as package name.
 
 </details>
 

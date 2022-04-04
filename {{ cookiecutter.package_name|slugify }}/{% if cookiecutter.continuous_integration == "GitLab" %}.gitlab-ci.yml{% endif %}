@@ -21,8 +21,8 @@ stages:
     - echo "CI_IMAGE_SHA=$DOCKER_IMAGE_SHA" >> .env
     - |
       echo "$DOCKER_REGISTRY_PASSWORD" | docker login --username "$DOCKER_REGISTRY_USER" --password-stdin "$DOCKER_REGISTRY"
-      DOCKER_PUSH=${DOCKER_PUSH:-$(timeout 2s docker pull "$DOCKER_IMAGE":"$DOCKER_IMAGE_SHA" >/dev/null 2>&1 && echo $? || echo $?)}
-      if [ "$DOCKER_PUSH" -ne 1 ]; then
+      DOCKER_BUILD_PUSH=${DOCKER_BUILD_PUSH:-$(timeout 2s docker pull "$DOCKER_IMAGE":"$DOCKER_IMAGE_SHA" >/dev/null 2>&1 && echo $? || echo $?)}
+      if [ "$DOCKER_BUILD_PUSH" -ne 1 ]; then
         echo "$DOCKER_IMAGE:$DOCKER_IMAGE_SHA exists, skipping this job..."
       else
         # Compile a list of image tags consisting of a hash of its contents, the latest tag if this
@@ -80,11 +80,6 @@ Test:
     paths:
       - .mypy_cache/
       - .pytest_cache/
-  {%- if cookiecutter.private_package_repository_name %}
-  variables:
-    POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_USERNAME: gitlab-ci-token
-    POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_PASSWORD: $CI_JOB_TOKEN
-  {%- endif %}
   script:
     - poetry install --no-interaction  # TODO: Add `--only test` when Poetry 1.2.0 is released.
     - poe lint
@@ -125,7 +120,7 @@ Publish:
     DOCKER_BASE_IMAGE: $CI_REGISTRY_IMAGE/ci:$CI_IMAGE_SHA
     DOCKER_IMAGE: $CI_REGISTRY_IMAGE
     DOCKER_IMAGE_SHA: ${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}
-    DOCKER_PUSH: 1
+    DOCKER_BUILD_PUSH: 1
     DOCKER_TARGET: app
   when: manual
 {% for environment in ["feature", "development", "test", "acceptance", "production"] %}

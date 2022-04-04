@@ -1,14 +1,10 @@
 name: Deploy
-
 on:
-  push:
-    tags:
-      - "v*.*.*"
   workflow_dispatch:
     inputs:
       environment:
         required: true
-        description: Deployment environment
+        description: Deployment environment (`acceptance` and `production` only run on tags)
         default: development
         type: choice
         options:
@@ -19,46 +15,55 @@ on:
           - production
 
 env:
-  DEFAULT_DEPLOYMENT_ENVIRONMENT: feature
   REGISTRY: ghcr.io
 
 jobs:
-
-  deploy:
-
-    runs-on: ubuntu-latest
-
-    if: startsWith(github.ref, 'refs/tags/v')
+  Deploy:
+    runs-on: ubuntu-20.04
+    environment: {% raw %}${{ github.event.inputs.environment }}{% endraw %}
+    if: |
+      (github.event.inputs.environment != 'acceptance' && github.event.inputs.environment != 'production') ||
+      ((github.event.inputs.environment != '') && startsWith(github.ref, 'refs/tags/'))
 
     steps:
+      - name: Download artifact
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: test.yml
+          workflow_conclusion: success
+          commit: {% raw %}${{ github.sha }}{% endraw %}
+          name: ci-image-hash
+
+      - name: Load base image variable from `test.yml` artifact
+        id: base_image
+        shell: bash
+        run: |
+          source .ci_image_hash
+          echo ::set-output name=DOCKER_BASE_IMAGE::$DOCKER_BASE_IMAGE
 
       - name: Checkout
         uses: actions/checkout@v2
 
-      - name: Log in to the Docker registry
-        uses: docker/login-action@v1
-        with:
-          registry: {% raw %}${{ env.REGISTRY }}{% endraw %}
-          username: {% raw %}${{ github.actor }}{% endraw %}
-          password: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
+      - name: Compute App image SHA
+        id: image_sha
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == *"/tags/"* ]]
+            then DOCKER_IMAGE_SHA="$GITHUB_REF_NAME"
+          else
+            DOCKER_IMAGE_SHA="${GITHUB_SHA:0:8}"
+          fi
+          echo ::set-output name=DOCKER_IMAGE_SHA::$DOCKER_IMAGE_SHA
 
-      - name: Set Docker image tag
-        run: echo "GIT_TAG=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v2
+      - name: Build and Push App
+        id: build_push_app
+        uses: ./.github/workflows/build_push
         with:
-          build-args: |
-            SOURCE_BRANCH={% raw %}${{ env.GITHUB_REF }}{% endraw %}
-            SOURCE_COMMIT={% raw %}${{ env.GITHUB_SHA }}{% endraw %}
-          context: .
-          push: true
-          {%- if cookiecutter.private_package_repository_name %}
-          secrets: |
-            poetry-http-basic-username={% raw %}${{{% endraw %} secrets.POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_USERNAME }}
-            poetry-http-basic-password={% raw %}${{{% endraw %} secrets.POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_PASSWORD }}
-          {%- endif %}
-          tags: |
-            {% raw %}${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ github.repository }}:${{ github.event.inputs.environment || env.DEFAULT_DEPLOYMENT_ENVIRONMENT }}{% endraw %}
-            {% raw %}${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ github.repository }}:${{ env.GIT_TAG }}{% endraw %}
-          target: app
+          DOCKER_REGISTRY: {% raw %}${{ env.REGISTRY }}{% endraw %}
+          DOCKER_USER: {% raw %}${{ github.actor }}{% endraw %}
+          DOCKER_PASSWORD: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
+          DOCKER_IMAGE: "{% raw %}${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ github.repository }}{% endraw %}"
+          DOCKER_TARGET: "app"
+          DOCKER_BUILD_PUSH: 1
+          DOCKER_BASE_IMAGE: {% raw %}${{ steps.base_image.outputs.DOCKER_BASE_IMAGE }}{% endraw %}
+          DOCKER_IMAGE_SHA: {% raw %}${{ steps.image_sha.outputs.DOCKER_IMAGE_SHA }}{% endraw %}

@@ -1,0 +1,118 @@
+name: 'Build and Push a docker image'
+
+description: 'Build and Push a docker image with a caching mechanism.'
+
+inputs:
+  DOCKER_REGISTRY:
+    description: "The docker registry"
+    required: true
+  DOCKER_USER:
+    description: "The docker registry user"
+    required: true
+  DOCKER_PASSWORD:
+    description: "The github token to connect to ghcr"
+    required: true
+  DOCKER_IMAGE:
+    description: "The docker image name"
+    required: true
+  DOCKER_TARGET:
+    description: "The dockerfile target"
+    required: true
+  DOCKER_BUILD_PUSH:
+    description: "Wether or not to build and push the image, even if the docker image is already cached on the registry."
+    required: false
+  {%- if cookiecutter.with_fastapi_api|int or cookiecutter.with_streamlit_app|int %}
+  DOCKER_BASE_IMAGE:
+    description: "The docker base image to build upon. If not provided, 'ci' will be used."
+    required: false
+    default: "ci"
+  {%- endif %}
+  DOCKER_IMAGE_SHA:
+    description: "SHA docker tag. If not provided, it will be recomputed."
+    required: false
+  {%- if cookiecutter.private_package_repository_name %}
+  POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_USERNAME:
+    description: "Poetry private package repository username."
+    required: true
+    default: "{% raw %}${{{% endraw %} secrets.POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_USERNAME }}"
+  POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_PASSWORD:
+    description: "Poetry private package repository password."
+    required: true
+    default: "{% raw %}${{{% endraw %} secrets.POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_PASSWORD }}"
+  {%- endif %}
+
+outputs:
+  DOCKER_TAG_SHA:
+    description: "SHA docker tag"
+    value: {% raw %}${{ steps.action_build_push.outputs.DOCKER_TAG_SHA }}{% endraw %}
+
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      id: action_build_push
+      run: |
+        # Set input variables as local variables.
+        DOCKER_REGISTRY={% raw %}${{ inputs.DOCKER_REGISTRY }}{% endraw %}
+        DOCKER_USER={% raw %}${{ inputs.DOCKER_USER }}{% endraw %}
+        DOCKER_PASSWORD={% raw %}${{ inputs.DOCKER_PASSWORD }}{% endraw %}
+        DOCKER_IMAGE={% raw %}${{ inputs.DOCKER_IMAGE }}{% endraw %}
+        DOCKER_TARGET={% raw %}${{ inputs.DOCKER_TARGET }}{% endraw %}
+        DOCKER_BUILD_PUSH={% raw %}${{ inputs.DOCKER_BUILD_PUSH }}{% endraw %}
+        {%- if cookiecutter.with_fastapi_api|int or cookiecutter.with_streamlit_app|int %}
+        DOCKER_BASE_IMAGE={% raw %}${{ inputs.DOCKER_BASE_IMAGE }}{% endraw %}
+        {%- endif %}
+        DOCKER_IMAGE_SHA={% raw %}${{ inputs.DOCKER_IMAGE_SHA }}{% endraw %}
+
+        # Convert github to gitlab compatible variables.
+        CI_COMMIT_REF_NAME=$GITHUB_REF_NAME
+        if [[ "$GITHUB_REF" == "refs/tags/"* ]]; then CI_COMMIT_TAG="$GITHUB_REF_NAME"; fi
+        CI_COMMIT_SHA=${GITHUB_SHA:0:12}
+        CI_COMMIT_TIMESTAMP=$(date +"%Y-%m-%dT%H:%M:%S+00:00")
+        if [[ "$GITHUB_REF" == "refs/heads/"* ]]; then CI_COMMIT_BRANCH="$GITHUB_REF_NAME"; fi
+        CI_DEFAULT_BRANCH="main"
+        CI_ENVIRONMENT_NAME={% raw %}${{ github.event.inputs.environment }}{% endraw %}
+
+        # Compute hash of image based on Dockerfile and app lib dependencies.
+        DOCKER_IMAGE_SHA=${DOCKER_IMAGE_SHA:-$(sha1sum Dockerfile poetry.lock pyproject.toml | sha1sum | cut -c 1-12)}
+        echo ::set-output name=DOCKER_TAG_SHA::$DOCKER_IMAGE:$DOCKER_IMAGE_SHA
+
+        # Log in to github container registry.
+        echo -n $DOCKER_PASSWORD | docker login --username $DOCKER_USER --password-stdin $DOCKER_REGISTRY
+
+        # Check if we need to build and push the docker image.
+        DOCKER_BUILD_PUSH=${DOCKER_BUILD_PUSH:-$(timeout 2s docker pull $DOCKER_IMAGE:$DOCKER_IMAGE_SHA >/dev/null 2>1 && echo $? || echo $?)}
+        if [ $DOCKER_BUILD_PUSH -ne 1 ]; then
+          echo "$DOCKER_IMAGE:$DOCKER_IMAGE_SHA exists, skipping this job..."
+        else
+          # Compile a list of image tags consisting of a hash of its contents, the latest tag if this
+          # pipeline is running for the default branch, and the Git tag if this commit is tagged.
+          DOCKER_TAGS=( "$DOCKER_IMAGE_SHA" )
+          if [[ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]]; then DOCKER_TAGS+=( "latest" ); fi
+          if [[ -n $CI_COMMIT_TAG ]]; then DOCKER_TAGS+=( "$CI_COMMIT_TAG" ); fi
+          if [[ -n $CI_ENVIRONMENT_NAME ]]; then DOCKER_TAGS+=( "$CI_ENVIRONMENT_NAME" ); fi
+
+          # Build the Docker image with all of the selected tags.
+          DOCKER_TAGS_JOINED=${DOCKER_TAGS[@]}
+          DOCKER_TAGS_JOINED="--tag $DOCKER_IMAGE:${DOCKER_TAGS_JOINED// / --tag $DOCKER_IMAGE:}"
+          DOCKER_BUILDKIT=1 docker build \
+              {%- if cookiecutter.with_fastapi_api|int or cookiecutter.with_streamlit_app|int %}
+              --build-arg APP_BASE_IMAGE="$DOCKER_BASE_IMAGE" \
+              {%- endif %}
+              --build-arg SOURCE_BRANCH=$CI_COMMIT_REF_NAME \
+              --build-arg SOURCE_COMMIT=$CI_COMMIT_SHA \
+              --build-arg SOURCE_TIMESTAMP=$CI_COMMIT_TIMESTAMP \
+              {%- if cookiecutter.private_package_repository_name %}
+              --secret id=poetry-http-basic-username,env=POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_USERNAME \
+              --secret id=poetry-http-basic-password,env=POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_PASSWORD \
+              {%- endif %}
+              --target $DOCKER_TARGET \
+              --pull \
+              $DOCKER_TAGS_JOINED \
+              .
+          # Push all the tagged images.
+          docker images
+          for DOCKER_TAG in ${DOCKER_TAGS[@]}; do
+              docker push "$DOCKER_IMAGE:$DOCKER_TAG"
+          done
+          fi

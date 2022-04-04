@@ -1,58 +1,60 @@
 name: Test
-
 on:
   push:
-    branches:
-      - main
-      - master
   pull_request:
 
+env:
+  REGISTRY: ghcr.io
+
 jobs:
-
-  test:
-
-    runs-on: ubuntu-latest
-
-    strategy:
-
-      matrix:
-        python-version: ["{{ cookiecutter.python_version }}"]
-      fail-fast: false
+  Test:
+    
+    runs-on: ubuntu-20.04
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v2
 
-      - name: Set up Python {% raw %}${{ matrix.python-version }}{% endraw %}
-        uses: actions/setup-python@v2
+      - name: Build and Push CI
+        id: build_push_ci
+        uses: ./.github/workflows/build_push
         with:
-          python-version: {% raw %}${{ matrix.python-version }}{% endraw %}
-
-      - name: Cache Python environment
-        uses: actions/cache@v2
-        with:
-          path: .venv
-          key: {% raw %}venv-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('poetry.lock') }}{% endraw %}
-
-      - name: Install Poetry
-        run: pip install --no-input poetry
-
-      - name: Install Python environment
-        run: |
+          DOCKER_REGISTRY: {% raw %}${{ env.REGISTRY }}{% endraw %}
+          DOCKER_USER: {% raw %}${{ github.actor }}{% endraw %}
+          DOCKER_PASSWORD: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
+          DOCKER_IMAGE: "{% raw %}${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ github.repository }}-ci{% endraw %}"
+          DOCKER_TARGET: "ci"
           {%- if cookiecutter.private_package_repository_name %}
-          poetry config http-basic.{{ cookiecutter.private_package_repository_name }} "{% raw %}${{{% endraw %} secrets.POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_USERNAME }}" "{% raw %}${{{% endraw %} secrets.POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_PASSWORD }}"
+          POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_USERNAME: "{% raw %}${{{% endraw %} secrets.POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_USERNAME }}"
+          POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_PASSWORD: "{% raw %}${{{% endraw %} secrets.POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|upper }}_PASSWORD }}"
           {%- endif %}
-          poetry config virtualenvs.in-project true
-          poetry install --no-interaction
 
-      - name: Lint
-        run: poetry run poe lint
+      - name: Lint and Test
+        id: lint_test
+        shell: bash
+        run: docker run --mount type=bind,src=$PWD,dst=/app --rm {% raw %}${{ steps.build_push_ci.outputs.DOCKER_TAG_SHA }}{% endraw %} /bin/bash -c "set -e; poetry install --no-interaction; poe lint; poe test"
 
-      - name: Test
-        run: poetry run poe test
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v2
+      - name: Upload Lint and Test results (on failure only)
+        if: failure() && steps.lint_test.outcome == 'failure'
+        uses: actions/upload-artifact@v3
         with:
-          files: reports/coverage.xml
+          name: junit
+          path: |
+            ./reports/mypy.xml
+            ./reports/pytest.xml
+
+      - name: Upload test coverage
+        uses: actions/upload-artifact@v3
+        with:
+          name: cobertura
+          path: ./reports/coverage.xml
+
+      - name: Persist CI hash locally
+        shell: bash
+        run: echo "DOCKER_BASE_IMAGE={% raw %}${{ steps.build_push_ci.outputs.DOCKER_TAG_SHA }}{% endraw %}" > .ci_image_hash
+
+      - name: Persist CI hash as an artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ci-image-hash
+          path: .ci_image_hash
