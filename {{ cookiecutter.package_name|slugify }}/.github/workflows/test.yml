@@ -9,48 +9,46 @@ on:
 
 jobs:
 
-  test:
-
+  build:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build dev Docker image
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          target: dev
+          push: true
+          cache-from: type=gha  
+          cache-to: type=gha,mode=max
+          tags: |
+            ghcr.io/${{ github.repository }}/ci:${{ github.sha }}
 
-    strategy:
-
-      matrix:
-        python-version: ["{{ cookiecutter.python_version }}"]
-      fail-fast: false
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/ci:${{ github.sha }}
 
     steps:
 
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Set up Python {% raw %}${{ matrix.python-version }}{% endraw %}
-        uses: actions/setup-python@v3
-        with:
-          python-version: {% raw %}${{ matrix.python-version }}{% endraw %}
-
-      - name: Cache Python environment
-        uses: actions/cache@v3
-        with:
-          path: .venv/
-          key: {% raw %}venv-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('poetry.lock') }}{% endraw %}
-
-      - name: Install Poetry
-        run: pip install --no-input poetry
-
-      - name: Install Python environment
-        run: |
-          {%- if cookiecutter.private_package_repository_name %}
-          poetry config http-basic.{{ cookiecutter.private_package_repository_name|slugify }} "{% raw %}${{{% endraw %} secrets.POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|slugify|upper|replace("-", "_") }}_USERNAME }}" "{% raw %}${{{% endraw %} secrets.POETRY_HTTP_BASIC_{{ cookiecutter.private_package_repository_name|slugify|upper|replace("-", "_") }}_PASSWORD }}"
-          {%- endif %}
-          poetry config virtualenvs.in-project true
-          poetry install --no-interaction
-
       - name: Lint
-        run: poetry run poe lint
+        run: poe lint
 
       - name: Test
-        run: poetry run poe test
+        run: poe test
 
       - name: Upload coverage
         uses: codecov/codecov-action@v3
