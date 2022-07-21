@@ -34,7 +34,7 @@ fastapi = "^0.78.0"
 gunicorn = "^20.1.0"
 {%- endif %}
 {%- if cookiecutter.with_fastapi_api|int or cookiecutter.with_streamlit_app|int %}
-poethepoet = "^0.14.0"
+poethepoet = "^0.16.0"
 {%- endif %}
 {%- if cookiecutter.with_pydantic_typing|int %}
 pydantic = "^1.9.1"
@@ -79,7 +79,7 @@ mypy = "^0.961"
 pdoc = "^12.0.2"
 pep8-naming = "^0.13.0"
 {%- if not cookiecutter.with_fastapi_api|int and not cookiecutter.with_streamlit_app|int %}
-poethepoet = "^0.14.0"
+poethepoet = "^0.16.0"
 {%- endif %}
 pre-commit = "^2.19.0"
 pydocstyle = { extras = ["toml"], version = "^6.1.1" }
@@ -247,6 +247,7 @@ testpaths = "tests"
       --workers 2
       {{ cookiecutter.package_name|slugify|replace('-', '_') }}.api:app
     """
+  use_exec = true
 
     [[tool.poe.tasks.serve.args]]
     help = "Bind socket to this port (default: 8000)"
@@ -266,6 +267,7 @@ testpaths = "tests"
       --theme.base light
       streamlit_app.py
     """
+  use_exec = true
 
     [[tool.poe.tasks.streamlit.args]]
     help = "Bind socket to this port (default: 8000)"
