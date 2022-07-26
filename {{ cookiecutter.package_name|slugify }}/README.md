@@ -75,6 +75,8 @@ To serve this app, run `docker compose up app` and open [localhost:8000](http://
 <details open>
 <summary>Setup: once per project</summary>
 
+_Containerized development_:
+
 1. Clone this repository.
 {%- if cookiecutter.private_package_repository_name %}
 1. Create a `.env` file in the project directory that [Docker Compose reads](https://docs.docker.com/compose/env-file/) to use Poetry's `auth.toml` file as a [build and run time secret](https://docs.docker.com/compose/compose-file/compose-file-v3/#secrets-configuration-reference):
@@ -93,6 +95,13 @@ To serve this app, run `docker compose up app` and open [localhost:8000](http://
     - _VS Code_: open the cloned repository and run <kbd>⌘</kbd> + <kbd>⇧</kbd> + <kbd>P</kbd> → _Remote-Containers: Reopen in Container_.
     - _PyCharm_: open the cloned repository and [configure Docker Compose as a remote interpreter](https://www.jetbrains.com/help/pycharm/using-docker-compose-as-a-remote-interpreter.html#docker-compose-remote).
     - _Terminal_: open the cloned repository and run `docker compose run --rm dev` to start an interactive Dev Container.
+
+_Local development_:
+
+1. Clone this repository.
+2. Install the Poetry environment with `poetry install`.
+3. Activate your Poetry environment with `poetry shell`.
+4. Install the pre-commit hooks with `pre-commit install --install-hooks`.
 
 </details>
 
