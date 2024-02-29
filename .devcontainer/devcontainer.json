@@ -8,7 +8,9 @@
             "extensions": [
                 "ms-python.python",
                 "tamasfe.even-better-toml",
-                "visualstudioexptteam.vscodeintellicode"
+                "visualstudioexptteam.vscodeintellicode",
+                "GitLab.gitlab-workflow",
+                "eamodio.gitlens"
             ],
             "settings": {
                 "editor.formatOnSave": true,
